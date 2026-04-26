@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="PortoKu">
+  <title>PortoKu</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="screen-login" class="screen active">
+    <div class="hero-shell">
+      <div class="hero-card">
+        <div class="hero-kicker">Autentikasi Aplikasi</div>
+        <h1 class="hero-title">PortoKu</h1>
+        <p class="hero-copy">
+          Masukkan PIN aplikasi untuk membuka dashboard dan mengakses data portofolio Anda.
+        </p>
+        <div class="pin-form">
+          <div class="field-label field-label-light">PIN Aplikasi</div>
+          <div id="pin-display" class="pin-display" aria-live="polite">○ ○ ○ ○ ○ ○</div>
+          <div id="login-status" class="hero-note">Masukkan PIN untuk melanjutkan.</div>
+        </div>
+      </div>
+
+      <div class="showcase-card">
+        <div class="showcase-title">Akses dengan PIN</div>
+        <div class="showcase-grid">
+          <div class="showcase-item">
+            <strong>PIN Aplikasi</strong>
+            <span>Dipakai untuk membuka aplikasi dan mengakses semua endpoint API.</span>
+          </div>
+          <div class="showcase-item">
+            <strong>PIN Transaksi</strong>
+            <span>Diminta lagi sebelum aksi simpan, edit, atau hapus data.</span>
+          </div>
+          <div class="showcase-item">
+            <strong>Sesi Per Browser</strong>
+            <span>PIN disimpan di session browser dan diverifikasi ulang saat aplikasi dibuka.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-dashboard" class="screen">
+    <div class="topbar">
+      <div>
+        <div class="topbar-title">PortoKu</div>
+        <div class="topbar-sub">Dashboard portofolio pribadi</div>
+      </div>
+      <button class="ghost-btn" type="button" onclick="loadDashboard(true)">Muat ulang</button>
+    </div>
+    <div class="content">
+      <div id="status-banner"></div>
+      <div id="dashboard-content" class="page-stack">
+        <div class="loading-card">Memuat data...</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-input" class="screen">
+    <div class="topbar">
+      <div>
+        <div class="topbar-title">Input Transaksi</div>
+        <div class="topbar-sub">JURNAL sebagai pusat input</div>
+      </div>
+    </div>
+    <div class="content">
+      <div id="input-banner"></div>
+      <div class="page-stack">
+        <div class="info-card">
+          <div class="info-title">Cara pakai singkat</div>
+          <p class="info-copy">
+            Anda cukup isi transaksi di sini. Nanti sheet `JURNAL` akan menjadi sumber utama, lalu dashboard dan portofolio mengikuti otomatis.
+          </p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Jenis transaksi</div>
+          <div id="type-grid" class="type-grid"></div>
+
+          <div id="field-kode" class="field-block">
+            <label class="field-label" for="input-kode">Kode saham</label>
+            <input id="input-kode" class="field-input" type="text" placeholder="contoh: BBCA" autocapitalize="characters">
+          </div>
+
+          <div id="field-harga-lot" class="field-row">
+            <div>
+              <label class="field-label" for="input-harga">Harga per lembar</label>
+              <input id="input-harga" class="field-input" type="number" placeholder="0" readonly inputmode="none" data-keypad-target="numeric">
+            </div>
+            <div>
+              <label class="field-label" for="input-lot">Lot</label>
+              <input id="input-lot" class="field-input" type="number" placeholder="0" readonly inputmode="none" data-keypad-target="numeric">
+            </div>
+          </div>
+
+          <div id="field-nilai" class="field-block">
+            <label class="field-label" for="input-nilai">Nominal</label>
+            <input id="input-nilai" class="field-input" type="number" placeholder="0" readonly inputmode="none" data-keypad-target="numeric">
+          </div>
+
+          <div class="field-block">
+            <label class="field-label" for="input-tanggal">Tanggal transaksi</label>
+            <input id="input-tanggal" class="field-input" type="date">
+          </div>
+
+          <div id="preview-box" class="preview-box"></div>
+
+          <button id="submit-btn" class="primary-btn block-btn" type="button" onclick="submitTransaksi()">
+            Simpan ke JURNAL
+          </button>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Riwayat input terbaru</div>
+          <div id="jurnal-filter" class="filter-scroll"></div>
+          <div id="jurnal-list">
+            <div class="loading-card">Memuat transaksi...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-riwayat" class="screen">
+    <div class="topbar">
+      <div>
+        <div class="topbar-title">Riwayat Realized</div>
+        <div class="topbar-sub">Yang sudah masuk hitungan untung rugi</div>
+      </div>
+    </div>
+    <div class="content">
+      <div id="riwayat-banner"></div>
+      <div class="page-stack">
+        <div id="filter-bulan" class="filter-scroll"></div>
+        <div id="riwayat-summary"></div>
+        <div id="riwayat-list">
+          <div class="loading-card">Memuat riwayat...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-analytics" class="screen">
+    <div class="topbar">
+      <div>
+        <div class="topbar-title">Performance</div>
+        <div class="topbar-sub">Ringkasan performa dari TRACKER_HELPER & RIWAYAT</div>
+      </div>
+    </div>
+    <div class="content">
+      <div id="analytics-banner"></div>
+      <div id="analytics-content" class="page-stack">
+        <div class="loading-card">Memuat performance...</div>
+      </div>
+    </div>
+  </div>
+
+  <nav id="bottom-nav" class="bottom-nav" style="display:none">
+    <button class="nav-item active" type="button" data-screen="dashboard" onclick="showScreen('dashboard')">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Dashboard</span>
+    </button>
+    <button class="nav-item" type="button" data-screen="input" onclick="showScreen('input')">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="4" y="4" width="16" height="16" rx="4" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+      <span>Input</span>
+    </button>
+    <button class="nav-item" type="button" data-screen="riwayat" onclick="showScreen('riwayat')">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v3M17 4v3M5 9h14M6 6h12a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Riwayat</span>
+    </button>
+    <button class="nav-item" type="button" data-screen="analytics" onclick="showScreen('analytics')">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16M7 16l3-4 3 2 4-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7" cy="16" r="1.2" fill="currentColor"/><circle cx="10" cy="12" r="1.2" fill="currentColor"/><circle cx="13" cy="14" r="1.2" fill="currentColor"/><circle cx="17" cy="8" r="1.2" fill="currentColor"/></svg>
+      <span>Performance</span>
+    </button>
+  </nav>
+
+  <div id="shared-keypad-shell" class="shared-keypad-shell" style="display:none">
+    <div class="pin-keypad" aria-label="Keypad Numerik">
+      <button class="pin-key" type="button" data-pin-key="1">1</button>
+      <button class="pin-key" type="button" data-pin-key="2">2</button>
+      <button class="pin-key" type="button" data-pin-key="3">3</button>
+      <button class="pin-key" type="button" data-pin-key="4">4</button>
+      <button class="pin-key" type="button" data-pin-key="5">5</button>
+      <button class="pin-key" type="button" data-pin-key="6">6</button>
+      <button class="pin-key" type="button" data-pin-key="7">7</button>
+      <button class="pin-key" type="button" data-pin-key="8">8</button>
+      <button class="pin-key" type="button" data-pin-key="9">9</button>
+      <button class="pin-key pin-key-muted" type="button" data-pin-action="backspace">⌫</button>
+      <button class="pin-key" type="button" data-pin-key="0">0</button>
+      <button id="pin-submit-btn" class="pin-key pin-key-submit" type="button" data-pin-action="submit" disabled>✓</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
