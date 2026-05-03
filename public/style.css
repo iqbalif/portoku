@@ -1,3 +1,24 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  height: 100%;
+}
+
+:root {
+  --bg: #0a0e1a;
+  --ink: #111;
+}
+
+html {
+  background: var(--bg);
+  color: var(--ink);
+}
+
 :root {
   --bg: #f5f7fb;
   --card: #ffffff;

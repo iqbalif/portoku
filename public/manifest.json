@@ -1,0 +1,20 @@
+{
+  "name": "PortoKu",
+  "short_name": "PortoKu",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "icons": [
+    {
+      "src": "/icon-1.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-1.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
