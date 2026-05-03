@@ -7,17 +7,23 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="PortoKu">
   <title>PortoKu</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500;700&family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="screen-login" class="screen active">
-    <div class="hero-shell">
-      <div class="hero-card">
+    <div class="login-layout">
+      <div class="login-top">
         <div class="hero-kicker">Autentikasi Aplikasi</div>
         <h1 class="hero-title">PortoKu</h1>
         <p class="hero-copy">
           Masukkan PIN aplikasi untuk membuka dashboard dan mengakses data portofolio Anda.
         </p>
+      </div>
+
+      <div class="login-pin-center">
         <div class="pin-form">
           <div class="field-label field-label-light">PIN Aplikasi</div>
           <div id="pin-display" class="pin-display" aria-live="polite">○ ○ ○ ○ ○ ○</div>
@@ -25,23 +31,7 @@
         </div>
       </div>
 
-      <div class="showcase-card">
-        <div class="showcase-title">Akses dengan PIN</div>
-        <div class="showcase-grid">
-          <div class="showcase-item">
-            <strong>PIN Aplikasi</strong>
-            <span>Dipakai untuk membuka aplikasi dan mengakses semua endpoint API.</span>
-          </div>
-          <div class="showcase-item">
-            <strong>PIN Transaksi</strong>
-            <span>Diminta lagi sebelum aksi simpan, edit, atau hapus data.</span>
-          </div>
-          <div class="showcase-item">
-            <strong>Sesi Per Browser</strong>
-            <span>PIN disimpan di session browser dan diverifikasi ulang saat aplikasi dibuka.</span>
-          </div>
-        </div>
-      </div>
+      <div id="login-keypad-slot" class="login-keypad-slot"></div>
     </div>
   </div>
 
@@ -90,17 +80,17 @@
           <div id="field-harga-lot" class="field-row">
             <div>
               <label class="field-label" for="input-harga">Harga per lembar</label>
-              <input id="input-harga" class="field-input" type="number" placeholder="0" readonly inputmode="none" data-keypad-target="numeric">
+              <input id="input-harga" class="field-input" type="text" placeholder="0" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
             </div>
             <div>
               <label class="field-label" for="input-lot">Lot</label>
-              <input id="input-lot" class="field-input" type="number" placeholder="0" readonly inputmode="none" data-keypad-target="numeric">
+              <input id="input-lot" class="field-input" type="text" placeholder="0" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
             </div>
           </div>
 
           <div id="field-nilai" class="field-block">
             <label class="field-label" for="input-nilai">Nominal</label>
-            <input id="input-nilai" class="field-input" type="number" placeholder="0" readonly inputmode="none" data-keypad-target="numeric">
+            <input id="input-nilai" class="field-input" type="text" placeholder="0" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
           </div>
 
           <div class="field-block">
@@ -180,6 +170,12 @@
   </nav>
 
   <div id="shared-keypad-shell" class="shared-keypad-shell" style="display:none">
+    <div id="transaction-pin-panel" class="transaction-pin-panel" style="display:none">
+      <div class="field-label">PIN Transaksi</div>
+      <div id="transaction-pin-display" class="pin-display pin-display-compact" aria-live="polite">○ ○ ○ ○ ○ ○</div>
+      <div id="transaction-pin-status" class="transaction-pin-status">Masukkan PIN untuk melanjutkan.</div>
+      <button id="transaction-pin-cancel" class="ghost-btn block-btn" type="button">Batal</button>
+    </div>
     <div class="pin-keypad" aria-label="Keypad Numerik">
       <button class="pin-key" type="button" data-pin-key="1">1</button>
       <button class="pin-key" type="button" data-pin-key="2">2</button>

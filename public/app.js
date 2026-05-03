@@ -34,8 +34,12 @@ const appState = {
   performanceTableView: 'daily',
   performanceShowAllGainers: false,
   performanceShowAllLosers: false,
+  performanceShowAllRows: false,
   loginPinBuffer: '',
-  keypadContext: null
+  transactionPinBuffer: '',
+  transactionPinResolver: null,
+  keypadContext: null,
+  portfolioData: []
 };
 let analyticsChart = null;
 
@@ -49,6 +53,61 @@ function parseAngka(str) {
     .replace(/,/g, '.')
     .trim();
   return parseFloat(cleaned) || 0;
+}
+
+function extractDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function formatInputThousands(value) {
+  const digits = extractDigits(value);
+  if (!digits) return '';
+  return new Intl.NumberFormat('id-ID').format(Number(digits));
+}
+
+function setNumericInputValue(input, rawValue) {
+  if (!input) return;
+  const raw = extractDigits(rawValue);
+  input.dataset.raw = raw;
+  input.value = raw ? formatInputThousands(raw) : '';
+}
+
+function getNumericInputValue(inputOrId) {
+  const input = typeof inputOrId === 'string'
+    ? document.getElementById(inputOrId)
+    : inputOrId;
+
+  if (!input) return 0;
+  if (input.dataset.raw !== undefined) {
+    return Number(input.dataset.raw || 0);
+  }
+  return Number(extractDigits(input.value)) || 0;
+}
+
+function bindFormattedNumericInputs(ids) {
+  ids.forEach((id) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+
+    if (!input.dataset.numericBound) {
+      input.addEventListener('input', () => {
+        const caretFromEnd = input.value.length - input.selectionStart;
+        setNumericInputValue(input, input.value);
+
+        const nextPosition = Math.max(0, input.value.length - caretFromEnd);
+        window.requestAnimationFrame(() => {
+          try {
+            input.setSelectionRange(nextPosition, nextPosition);
+          } catch (error) {
+            // Some mobile browsers do not allow selection changes for all input states.
+          }
+        });
+      });
+      input.dataset.numericBound = 'true';
+    }
+
+    setNumericInputValue(input, input.dataset.raw ?? input.value);
+  });
 }
 
 function parseSigned(str) {
@@ -109,6 +168,24 @@ function formatDateForSheet(value) {
   if (!date) return value || '';
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
   return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function formatShortDate(value, includeYear = true) {
+  const date = parseDate(value);
+  if (!date) return '';
+  const parts = [
+    String(date.getDate()).padStart(2, '0'),
+    String(date.getMonth() + 1).padStart(2, '0')
+  ];
+  if (includeYear) {
+    parts.push(String(date.getFullYear()).slice(-2));
+  }
+  return parts.join('/');
+}
+
+function shouldIncludeYearForChart(series) {
+  const years = new Set((series || []).map((row) => parseDate(row?.date)?.getFullYear()).filter(Boolean));
+  return years.size > 1;
 }
 
 function parseDate(value) {
@@ -230,6 +307,14 @@ function addYears(date, amount) {
   return next;
 }
 
+function diffDays(startDate, endDate) {
+  if (!startDate || !endDate) return 0;
+  const start = normalizeDateOnly(startDate);
+  const end = normalizeDateOnly(endDate);
+  if (!start || !end) return 0;
+  return Math.round((end - start) / (1000 * 60 * 60 * 24));
+}
+
 function parseDecimalCumulative(value) {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -247,6 +332,23 @@ function calculateTradeNominal(harga, lot) {
   const parsedHarga = parseAngka(harga);
   const parsedLot = parseAngka(lot);
   return parsedHarga * parsedLot * 100;
+}
+
+function isKenaMaterai(totalHarian) {
+  return totalHarian >= 10000000;
+}
+
+function logMateraiEvaluation(source, state, nilaiTransaksi) {
+  const totalSebelum = Number(state?.existingTradeNominal) || 0;
+  const totalSesudah = Number(state?.totalAfterCurrent) || 0;
+  console.log('[BEA METERAI]', {
+    source,
+    totalHarianSebelumTransaksi: totalSebelum,
+    nilaiTransaksi: Number(nilaiTransaksi) || 0,
+    totalHarianSetelahTransaksi: totalSesudah,
+    kenaMaterai: isKenaMaterai(totalSesudah),
+    beaMeteraiSudahAda: Boolean(state?.beaMeteraiExists)
+  });
 }
 
 function getDailyMeteraiState(tanggal, extraNominal = 0) {
@@ -346,7 +448,7 @@ function getAttentionDates(indexToIgnore = null) {
 
   const attentionDates = new Set();
   Object.entries(byDate).forEach(([key, value]) => {
-    if (value.tradeTotal >= 10000000 && !value.beaMeteraiExists) {
+    if (isKenaMaterai(value.tradeTotal) && !value.beaMeteraiExists) {
       attentionDates.add(key);
     }
   });
@@ -374,32 +476,79 @@ function getSharedKeypadShell() {
   return document.getElementById('shared-keypad-shell');
 }
 
+function getLoginKeypadSlot() {
+  return document.getElementById('login-keypad-slot');
+}
+
+function placeSharedKeypadForContext() {
+  const shell = getSharedKeypadShell();
+  if (!shell) return;
+
+  if (appState.keypadContext?.type === 'login') {
+    const loginSlot = getLoginKeypadSlot();
+    if (loginSlot && shell.parentElement !== loginSlot) {
+      loginSlot.appendChild(shell);
+    }
+    return;
+  }
+
+  if (shell.parentElement !== document.body) {
+    document.body.appendChild(shell);
+  }
+}
+
+function renderPinIndicator(targetId, digitCount) {
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  const safeDigits = Math.min(6, Math.max(0, digitCount));
+  const filled = Array.from({ length: safeDigits }, () => '●');
+  const empty = Array.from({ length: 6 - safeDigits }, () => '○');
+  target.textContent = [...filled, ...empty].join(' ');
+}
+
+function updateLoginPinView() {
+  renderPinIndicator('pin-display', appState.loginPinBuffer.length);
+}
+
+function updateTransactionPinView(message = '') {
+  renderPinIndicator('transaction-pin-display', appState.transactionPinBuffer.length);
+  const status = document.getElementById('transaction-pin-status');
+  if (status) {
+    status.textContent = message || 'Masukkan PIN untuk melanjutkan.';
+  }
+}
+
 function updateSharedKeypadState() {
   const shell = getSharedKeypadShell();
   const submitButton = document.getElementById('pin-submit-btn');
+  const transactionPanel = document.getElementById('transaction-pin-panel');
   if (!shell || !submitButton) return;
+  placeSharedKeypadForContext();
 
   if (!appState.keypadContext) {
     shell.style.display = 'none';
     shell.classList.remove('keypad-login-mode');
+    document.body.classList.remove('keypad-visible', 'transaction-pin-active');
+    if (transactionPanel) transactionPanel.style.display = 'none';
     return;
   }
 
   shell.style.display = 'block';
   shell.classList.toggle('keypad-login-mode', appState.keypadContext.type === 'login');
+  document.body.classList.add('keypad-visible');
+  document.body.classList.toggle('transaction-pin-active', appState.keypadContext.type === 'transactionPin');
+  if (transactionPanel) {
+    transactionPanel.style.display = appState.keypadContext.type === 'transactionPin' ? 'grid' : 'none';
+  }
 
   if (appState.keypadContext.type === 'login') {
     submitButton.disabled = appState.loginPinBuffer.length < 6;
     return;
   }
 
-  submitButton.disabled = false;
-}
-
-function hideSharedKeypad() {
-  if (appState.keypadContext?.type === 'numeric') {
-    appState.keypadContext = null;
-    updateSharedKeypadState();
+  if (appState.keypadContext.type === 'transactionPin') {
+    submitButton.disabled = appState.transactionPinBuffer.length < 6;
+    return;
   }
 }
 
@@ -408,58 +557,51 @@ function showLoginKeypad() {
   updateSharedKeypadState();
 }
 
-function dispatchNumericInputUpdate(target) {
-  target.dispatchEvent(new Event('input', { bubbles: true }));
-  target.dispatchEvent(new Event('change', { bubbles: true }));
-}
-
-function openNumericKeypad(target) {
-  if (!target) return;
-  appState.keypadContext = { type: 'numeric', targetId: target.id };
+function closeTransactionPin(result) {
+  if (typeof appState.transactionPinResolver === 'function') {
+    appState.transactionPinResolver(result);
+  }
+  appState.transactionPinResolver = null;
+  appState.transactionPinBuffer = '';
+  updateTransactionPinView();
+  appState.keypadContext = null;
   updateSharedKeypadState();
 }
 
-function bindNumericKeypadTargets(ids) {
-  ids.forEach((id) => {
-    const target = document.getElementById(id);
-    if (!target || target.dataset.keypadBound) return;
-
-    target.setAttribute('readonly', 'readonly');
-    target.setAttribute('inputmode', 'none');
-    target.dataset.keypadTarget = 'numeric';
-
-    const openHandler = (event) => {
-      event.preventDefault();
-      openNumericKeypad(target);
-    };
-
-    target.addEventListener('focus', openHandler);
-    target.addEventListener('click', openHandler);
-    target.dataset.keypadBound = 'true';
-  });
+function showTransactionPinKeypad() {
+  appState.transactionPinBuffer = '';
+  appState.keypadContext = { type: 'transactionPin' };
+  updateTransactionPinView();
+  updateSharedKeypadState();
 }
 
 function bindSharedKeypad() {
   const keypadButtons = document.querySelectorAll('[data-pin-key]');
   const actionButtons = document.querySelectorAll('[data-pin-action]');
+  const transactionCancel = document.getElementById('transaction-pin-cancel');
 
   keypadButtons.forEach((key) => {
     if (key.dataset.bound) return;
     key.addEventListener('click', () => {
       if (!appState.keypadContext) return;
+      key.classList.add('is-pressed');
+      window.setTimeout(() => key.classList.remove('is-pressed'), 120);
 
       if (appState.keypadContext.type === 'login') {
         if (appState.loginPinBuffer.length >= 6) return;
         appState.loginPinBuffer += key.dataset.pinKey;
+        updateLoginPinView();
         updateSharedKeypadState();
         return;
       }
 
-      const target = document.getElementById(appState.keypadContext.targetId);
-      if (!target) return;
-      target.value = `${target.value || ''}${key.dataset.pinKey}`;
-      dispatchNumericInputUpdate(target);
-      updateSharedKeypadState();
+      if (appState.keypadContext.type === 'transactionPin') {
+        if (appState.transactionPinBuffer.length >= 6) return;
+        appState.transactionPinBuffer += key.dataset.pinKey;
+        updateTransactionPinView();
+        updateSharedKeypadState();
+        return;
+      }
     });
     key.dataset.bound = 'true';
   });
@@ -473,15 +615,17 @@ function bindSharedKeypad() {
       if (action === 'backspace') {
         if (appState.keypadContext.type === 'login') {
           appState.loginPinBuffer = appState.loginPinBuffer.slice(0, -1);
+          updateLoginPinView();
           updateSharedKeypadState();
           return;
         }
 
-        const target = document.getElementById(appState.keypadContext.targetId);
-        if (!target) return;
-        target.value = `${target.value || ''}`.slice(0, -1);
-        dispatchNumericInputUpdate(target);
-        updateSharedKeypadState();
+        if (appState.keypadContext.type === 'transactionPin') {
+          appState.transactionPinBuffer = appState.transactionPinBuffer.slice(0, -1);
+          updateTransactionPinView();
+          updateSharedKeypadState();
+          return;
+        }
       }
 
       if (action === 'submit') {
@@ -492,21 +636,19 @@ function bindSharedKeypad() {
           }
           return;
         }
-        hideSharedKeypad();
+        if (appState.keypadContext.type === 'transactionPin') {
+          if (appState.transactionPinBuffer.length < 6) return;
+          closeTransactionPin(appState.transactionPinBuffer);
+          return;
+        }
       }
     });
     actionButton.dataset.bound = 'true';
   });
 
-  if (!document.body.dataset.sharedKeypadOutsideBound) {
-    document.addEventListener('click', (event) => {
-      if (appState.keypadContext?.type !== 'numeric') return;
-      const shell = getSharedKeypadShell();
-      const activeTarget = document.getElementById(appState.keypadContext.targetId);
-      if (shell?.contains(event.target) || activeTarget?.contains(event.target)) return;
-      hideSharedKeypad();
-    });
-    document.body.dataset.sharedKeypadOutsideBound = 'true';
+  if (transactionCancel && !transactionCancel.dataset.bound) {
+    transactionCancel.addEventListener('click', () => closeTransactionPin(null));
+    transactionCancel.dataset.bound = 'true';
   }
 }
 
@@ -553,7 +695,11 @@ async function requireTransactionPin() {
     throw new Error('Sesi PIN tidak ditemukan. Silakan login ulang.');
   }
 
-  const transactionPin = prompt('Masukkan PIN Transaksi:');
+  const transactionPin = await new Promise((resolve) => {
+    appState.transactionPinResolver = resolve;
+    showTransactionPinKeypad();
+  });
+
   if (transactionPin === null) {
     return false;
   }
@@ -660,16 +806,7 @@ async function bootstrapApp() {
 
 function renderLoginState(errorMessage = '') {
   const status = document.getElementById('login-status');
-  const pinDisplay = document.getElementById('pin-display');
   const button = document.getElementById('pin-submit-btn');
-
-  function updatePinDisplay() {
-    const digits = appState.loginPinBuffer.length;
-    const filled = Array.from({ length: digits }, () => '●');
-    const empty = Array.from({ length: Math.max(0, 6 - digits) }, () => '○');
-    pinDisplay.textContent = [...filled, ...empty].join(' ');
-    updateSharedKeypadState();
-  }
 
   async function submitPin() {
     const pin = appState.loginPinBuffer;
@@ -690,12 +827,14 @@ function renderLoginState(errorMessage = '') {
       appState.configured = data.configured;
       appState.loggedIn = true;
       appState.loginPinBuffer = '';
-      updatePinDisplay();
+      updateLoginPinView();
+      updateSharedKeypadState();
       showScreen('dashboard');
     } catch (error) {
       clearStoredPin();
       appState.loginPinBuffer = '';
-      updatePinDisplay();
+      updateLoginPinView();
+      updateSharedKeypadState();
       status.textContent = error.message;
     } finally {
       button.disabled = appState.loginPinBuffer.length < 6;
@@ -703,7 +842,7 @@ function renderLoginState(errorMessage = '') {
   }
 
   status.textContent = errorMessage || 'Masukkan PIN untuk melanjutkan.';
-  updatePinDisplay();
+  updateLoginPinView();
   showLoginKeypad();
   button.onclick = submitPin;
 }
@@ -741,6 +880,8 @@ function initInputForm() {
     inputTanggal.value = `${yyyy}-${mm}-${dd}`;
   }
 
+  bindFormattedNumericInputs(['input-harga', 'input-lot', 'input-nilai']);
+  ensureSellInputHelpers();
   ['input-harga', 'input-lot', 'input-nilai'].forEach((id) => {
     const element = document.getElementById(id);
     if (!element.dataset.bound) {
@@ -748,14 +889,85 @@ function initInputForm() {
       element.dataset.bound = 'true';
     }
   });
-  bindNumericKeypadTargets(['input-harga', 'input-lot', 'input-nilai']);
 
   if (!inputTanggal.dataset.bound) {
     inputTanggal.addEventListener('input', updatePreview);
     inputTanggal.dataset.bound = 'true';
   }
 
+  const inputKode = document.getElementById('input-kode');
+  if (inputKode && !inputKode.dataset.boundSellHelpers) {
+    inputKode.addEventListener('input', () => {
+      inputKode.value = inputKode.value.toUpperCase();
+      refreshSellAllButton();
+    });
+    inputKode.addEventListener('change', refreshSellAllButton);
+    inputKode.dataset.boundSellHelpers = 'true';
+  }
+
   updateInputVisibility();
+}
+
+function ensureSellInputHelpers() {
+  const inputKode = document.getElementById('input-kode');
+  if (inputKode && !document.getElementById('portfolio-code-options')) {
+    inputKode.insertAdjacentHTML('afterend', '<datalist id="portfolio-code-options"></datalist>');
+  }
+  if (inputKode) {
+    inputKode.setAttribute('list', 'portfolio-code-options');
+  }
+
+  const lotInput = document.getElementById('input-lot');
+  if (lotInput && !document.getElementById('sell-all-btn')) {
+    lotInput.insertAdjacentHTML('afterend', `
+      <button id="sell-all-btn" class="ghost-btn sell-all-btn" type="button" style="display:none">
+        Jual semua
+      </button>
+    `);
+    document.getElementById('sell-all-btn')?.addEventListener('click', () => {
+      const selectedCode = (document.getElementById('input-kode')?.value || '').trim().toUpperCase();
+      const position = (appState.portfolioData || []).find((item) => item.kode === selectedCode);
+      if (!position) return;
+      setNumericInputValue(document.getElementById('input-lot'), position.lot);
+      updatePreview();
+      refreshSellAllButton();
+    });
+  }
+}
+
+function refreshSellInputOptions() {
+  const inputKode = document.getElementById('input-kode');
+  const dataList = document.getElementById('portfolio-code-options');
+  if (!inputKode || !dataList) return;
+
+  const isSell = appState.selectedType === 'JUAL';
+  inputKode.removeAttribute('list');
+
+  if (!isSell || !appState.portfolioData.length) {
+    dataList.innerHTML = '';
+    return;
+  }
+
+  inputKode.setAttribute('list', 'portfolio-code-options');
+  dataList.innerHTML = appState.portfolioData.map((item) => `
+    <option value="${item.kode}">${item.kode}</option>
+  `).join('');
+}
+
+function refreshSellAllButton() {
+  const sellAllButton = document.getElementById('sell-all-btn');
+  const lotInput = document.getElementById('input-lot');
+  const selectedCode = (document.getElementById('input-kode')?.value || '').trim().toUpperCase();
+
+  if (!sellAllButton || !lotInput) return;
+
+  const position = (appState.portfolioData || []).find((item) => item.kode === selectedCode);
+  const canShow = appState.selectedType === 'JUAL' && Boolean(position && position.lot);
+
+  sellAllButton.style.display = canShow ? 'inline-flex' : 'none';
+  sellAllButton.textContent = canShow
+    ? `Jual semua (${position.lot.toLocaleString('id-ID')} lot)`
+    : 'Jual semua';
 }
 
 function updateInputVisibility() {
@@ -774,6 +986,8 @@ function updateInputVisibility() {
     <div class="preview-help">${type.help}</div>
     <div id="preview-body"></div>
   `;
+  refreshSellInputOptions();
+  refreshSellAllButton();
   updatePreview();
 }
 
@@ -783,18 +997,20 @@ function updatePreview() {
   const tanggal = document.getElementById('input-tanggal').value;
 
   if (['BELI', 'JUAL'].includes(appState.selectedType)) {
-    const harga = Number(document.getElementById('input-harga').value) || 0;
-    const lot = Number(document.getElementById('input-lot').value) || 0;
+    const harga = getNumericInputValue('input-harga');
+    const lot = getNumericInputValue('input-lot');
     const lembar = lot * 100;
     const gross = harga * lembar;
     const feeRate = appState.selectedType === 'JUAL' ? 0.0015 : 0.0015;
     const est = appState.selectedType === 'JUAL' ? gross * (1 - feeRate) : gross * (1 + feeRate);
     const meteraiState = getDailyMeteraiState(tanggal, gross);
+    const kenaMaterai = isKenaMaterai(meteraiState.totalAfterCurrent);
+    logMateraiEvaluation('preview transaksi', meteraiState, gross);
     let meteraiLabel = 'Belum kena';
 
     if (meteraiState.beaMeteraiExists) {
       meteraiLabel = 'Telah dikenakan bea meterai';
-    } else if (meteraiState.totalAfterCurrent >= 10000000) {
+    } else if (kenaMaterai) {
       meteraiLabel = 'Transaksi ini akan memicu bea meterai';
     }
 
@@ -806,7 +1022,7 @@ function updatePreview() {
     return;
   }
 
-  const nominal = Number(document.getElementById('input-nilai').value) || 0;
+  const nominal = getNumericInputValue('input-nilai');
   previewBody.innerHTML = `
     <div class="preview-row"><span>Nominal tercatat</span><strong>${formatRp(nominal)}</strong></div>
     <div class="preview-row"><span>Tujuan data</span><strong>Google Sheets asli</strong></div>
@@ -826,8 +1042,8 @@ async function submitTransaksi() {
   const payload = { jenis: appState.selectedType, tanggal, beaMeterai: false };
   if (['BELI', 'JUAL'].includes(appState.selectedType)) {
     const kode = document.getElementById('input-kode').value.toUpperCase().trim();
-    const harga = Number(document.getElementById('input-harga').value) || 0;
-    const lot = Number(document.getElementById('input-lot').value) || 0;
+    const harga = getNumericInputValue('input-harga');
+    const lot = getNumericInputValue('input-lot');
     if (!kode || !harga || !lot) {
       alert('Lengkapi kode saham, harga, dan lot terlebih dahulu.');
       return;
@@ -835,12 +1051,15 @@ async function submitTransaksi() {
     payload.kode = kode;
     payload.harga = harga;
     payload.lot = lot;
-    payload.beaMeterai = calculateTradeNominal(harga, lot) >= 10000000;
+    const nilaiTransaksi = calculateTradeNominal(harga, lot);
+    const meteraiState = getDailyMeteraiState(tanggal, nilaiTransaksi);
+    logMateraiEvaluation('submit transaksi', meteraiState, nilaiTransaksi);
+    payload.beaMeterai = !meteraiState.beaMeteraiExists && isKenaMaterai(meteraiState.totalAfterCurrent);
   } else if (appState.selectedType === 'BEA METERAI') {
     payload.kode = 'Bea Meterai';
     payload.harga = 10000;
   } else {
-    const nominal = Number(document.getElementById('input-nilai').value) || 0;
+    const nominal = getNumericInputValue('input-nilai');
     if (!nominal) {
       alert('Nominal transaksi belum diisi.');
       return;
@@ -860,7 +1079,13 @@ async function submitTransaksi() {
     });
     alert('Transaksi berhasil disimpan ke JURNAL.');
     ['input-kode', 'input-harga', 'input-lot', 'input-nilai'].forEach((id) => {
-      document.getElementById(id).value = '';
+      const element = document.getElementById(id);
+      if (!element) return;
+      if (['input-harga', 'input-lot', 'input-nilai'].includes(id)) {
+        setNumericInputValue(element, '');
+        return;
+      }
+      element.value = '';
     });
     updatePreview();
     loadDashboard(true);
@@ -934,11 +1159,16 @@ async function loadDashboard(showToast = false) {
 }
 
 function renderDashboard(summary, portfolio) {
+  appState.portfolioData = portfolio;
+  if (appState.currentScreen === 'input') {
+    refreshSellInputOptions();
+    refreshSellAllButton();
+  }
   const target = document.getElementById('dashboard-content');
   const sortedPortfolio = [...portfolio].sort((a, b) => b.pct - a.pct);
   const portfolioRows = sortedPortfolio.length ? sortedPortfolio.map((item) => `
     <div class="list-row">
-      <div>
+      <div class="list-left">
         <div class="list-title">${item.kode}</div>
         <div class="portfolio-meta-grid">
           <div class="portfolio-meta-item">
@@ -956,7 +1186,7 @@ function renderDashboard(summary, portfolio) {
         </div>
       </div>
       <div class="list-right">
-        <div class="portfolio-pl-label">Potential P/L</div>
+        <div class="portfolio-pl-label">Potential Profit/Loss</div>
         <div class="list-title ${toneClass(item.unrealized)}">${formatRp(item.unrealized)}</div>
         <div class="pill ${toneClass(item.unrealized)}">${formatPct(item.pct)}</div>
       </div>
@@ -968,11 +1198,11 @@ function renderDashboard(summary, portfolio) {
       <div class="dashboard-card dashboard-card-large dashboard-card-primary">
         <div class="dashboard-card-head">
           <div class="panel-kicker">Ringkasan utama</div>
-          <div class="dashboard-card-label">Total Kekayaan</div>
-        </div>
-        <div class="dashboard-card-value dashboard-card-value-xl">${formatRp(summary.totalKekayaan)}</div>
-        <div class="dashboard-card-copy">
-          <strong>${formatPct(summary.pertumbuhan)}</strong> dari modal
+        <div class="dashboard-card-label">Total Kekayaan</div>
+      </div>
+      <div class="dashboard-card-value dashboard-card-value-xl">${formatRp(summary.totalKekayaan)}</div>
+      <div class="dashboard-card-copy">
+          <strong class="${toneClass(summary.pertumbuhan)}">${formatPct(summary.pertumbuhan)}</strong> dari modal
         </div>
         <div class="dashboard-card-copy">Modal disetor ${formatRp(summary.modalDisetor)}</div>
       </div>
@@ -992,12 +1222,12 @@ function renderDashboard(summary, portfolio) {
 
       <div class="dashboard-stack">
         <div class="dashboard-card dashboard-card-small">
-          <div class="dashboard-card-label">Realized P/L</div>
+          <div class="dashboard-card-label">Realized Profit/Loss</div>
           <div class="dashboard-card-value ${toneClass(summary.realizedAll)}">${formatRp(summary.realizedAll)}</div>
           <div class="dashboard-card-copy">Hasil yang sudah terkunci</div>
         </div>
         <div class="dashboard-card dashboard-card-small">
-          <div class="dashboard-card-label">Unrealized P/L</div>
+          <div class="dashboard-card-label">Unrealized Profit/Loss</div>
           <div class="dashboard-card-value ${toneClass(summary.unrealized)}">${formatRp(summary.unrealized)}</div>
           <div class="dashboard-card-copy">Untung rugi posisi yang masih aktif</div>
         </div>
@@ -1139,17 +1369,17 @@ function buildJurnalEditor() {
       <div id="edit-stock-fields" class="field-row" style="${isStock ? '' : 'display:none'}">
         <div>
           <label class="field-label" for="edit-harga">Harga</label>
-          <input id="edit-harga" class="field-input" type="number" value="${parseAngka(row[3]) || ''}">
+          <input id="edit-harga" class="field-input" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-raw="${parseAngka(row[3]) || ''}" value="${formatInputThousands(parseAngka(row[3]) || '')}">
         </div>
         <div>
           <label class="field-label" for="edit-lot">Lot</label>
-          <input id="edit-lot" class="field-input" type="number" value="${parseAngka(row[4]) || ''}">
+          <input id="edit-lot" class="field-input" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-raw="${parseAngka(row[4]) || ''}" value="${formatInputThousands(parseAngka(row[4]) || '')}">
         </div>
       </div>
 
       <div id="edit-nominal-fields" class="field-block" style="${isStock ? 'display:none' : ''}">
         <label class="field-label" for="edit-nominal">Nominal</label>
-        <input id="edit-nominal" class="field-input" type="number" value="${parseAngka(row[3]) || ''}">
+        <input id="edit-nominal" class="field-input" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-raw="${parseAngka(row[3]) || ''}" value="${formatInputThousands(parseAngka(row[3]) || '')}">
       </div>
 
       <div class="preview-box preview-box-soft">
@@ -1161,6 +1391,7 @@ function buildJurnalEditor() {
 
       <div class="editor-actions">
         <button type="button" class="primary-btn block-btn" onclick="saveJurnalEditor()">Simpan perubahan</button>
+        <button type="button" class="ghost-btn block-btn" onclick="closeJurnalEditor()">Batal</button>
         <button type="button" class="danger-btn block-btn" onclick="deleteJurnalEditor()">Hapus transaksi</button>
       </div>
     </div>
@@ -1190,6 +1421,7 @@ function toggleJurnalEditorFields() {
 }
 
 function bindJurnalEditorInputs() {
+  bindFormattedNumericInputs(['edit-harga', 'edit-lot', 'edit-nominal']);
   ['edit-tanggal', 'edit-jenis', 'edit-kode', 'edit-harga', 'edit-lot', 'edit-nominal'].forEach((id) => {
     const element = document.getElementById(id);
     if (!element || element.dataset.bound) return;
@@ -1197,7 +1429,6 @@ function bindJurnalEditorInputs() {
     element.addEventListener('change', updateJurnalEditorPreview);
     element.dataset.bound = 'true';
   });
-  bindNumericKeypadTargets(['edit-harga', 'edit-lot', 'edit-nominal']);
 }
 
 function updateJurnalEditorPreview() {
@@ -1211,8 +1442,8 @@ function updateJurnalEditorPreview() {
 
   if (['BELI', 'JUAL'].includes(jenis)) {
     const original = appState.jurnalData[appState.editingJurnalIndex];
-    const harga = document.getElementById('edit-harga')?.value || 0;
-    const lot = document.getElementById('edit-lot')?.value || 0;
+    const harga = getNumericInputValue('edit-harga');
+    const lot = getNumericInputValue('edit-lot');
     const gross = calculateTradeNominal(harga, lot);
     const originalHarga = parseAngka(original[3]);
     const originalLot = parseAngka(original[4]);
@@ -1221,16 +1452,18 @@ function updateJurnalEditorPreview() {
     const originalEstimasi = jenis === 'JUAL' ? originalGross * (1 - feeRate) : originalGross * (1 + feeRate);
     const estimasi = jenis === 'JUAL' ? gross * (1 - feeRate) : gross * (1 + feeRate);
     const meteraiState = getDailyMeteraiStateForEdit(appState.editingJurnalIndex, tanggal, gross);
+    const kenaMaterai = isKenaMaterai(meteraiState.totalAfterCurrent);
+    logMateraiEvaluation('preview edit transaksi', meteraiState, gross);
 
     let meteraiLabel = 'Belum kena';
     if (meteraiState.beaMeteraiExists) {
       meteraiLabel = 'Hari itu sudah punya bea meterai';
-    } else if (meteraiState.totalAfterCurrent >= 10000000) {
+    } else if (kenaMaterai) {
       meteraiLabel = 'Edit ini akan memicu bea meterai';
     }
 
     if (warning) {
-      if (!meteraiState.beaMeteraiExists && meteraiState.totalAfterCurrent >= 10000000) {
+      if (!meteraiState.beaMeteraiExists && kenaMaterai) {
         warning.style.display = 'block';
         warning.innerHTML = 'Perhatian: setelah edit ini, total transaksi hari tersebut melewati Rp10.000.000 dan belum ada bea meterai. Tambahkan bea meterai secara manual.';
       } else {
@@ -1249,7 +1482,7 @@ function updateJurnalEditorPreview() {
     return;
   }
 
-  const nominal = Number(document.getElementById('edit-nominal')?.value) || 0;
+  const nominal = getNumericInputValue('edit-nominal');
   if (warning) {
     warning.style.display = 'none';
     warning.innerHTML = '';
@@ -1277,14 +1510,14 @@ async function saveJurnalEditor() {
   };
 
   if (['BELI', 'JUAL'].includes(jenis)) {
-    payload.harga = Number(document.getElementById('edit-harga').value) || '';
-    payload.lot = Number(document.getElementById('edit-lot').value) || '';
+    payload.harga = getNumericInputValue('edit-harga') || '';
+    payload.lot = getNumericInputValue('edit-lot') || '';
     if (!payload.kode || !payload.harga || !payload.lot) {
       alert('Lengkapi kode, harga, dan lot terlebih dahulu.');
       return;
     }
   } else {
-    payload.harga = Number(document.getElementById('edit-nominal').value) || '';
+    payload.harga = getNumericInputValue('edit-nominal') || '';
     payload.lot = '';
     if (!payload.harga) {
       alert('Nominal transaksi belum diisi.');
@@ -1617,6 +1850,8 @@ function calculateTradingMetrics(rows) {
   if (!totalTrade) {
     return {
       totalTrade: '-',
+      winCount: '0',
+      loseCount: '0',
       winRate: '-',
       profitFactor: '-',
       maxProfit: '-',
@@ -1655,6 +1890,8 @@ function calculateTradingMetrics(rows) {
 
   return {
     totalTrade: totalTrade.toLocaleString('id-ID'),
+    winCount: positiveTrades.length.toLocaleString('id-ID'),
+    loseCount: negativeTrades.length.toLocaleString('id-ID'),
     winRate,
     profitFactor,
     maxProfit: maxProfitTrade ? formatRp(maxProfitTrade.value) : '-',
@@ -1687,9 +1924,9 @@ function renderTradeRankList(trades, kind, expanded) {
     return '<div class="rank-empty">-</div>';
   }
 
-  const visibleTrades = expanded ? trades : trades.slice(0, 5);
+  const visibleTrades = expanded ? trades : trades.slice(0, 3);
   const toneClassName = kind === 'gainer' ? 'performance-positive' : 'performance-negative';
-  const toggleLabel = expanded ? 'Tampilkan Ringkas' : 'Show All';
+  const toggleLabel = expanded ? 'Show Top 3' : 'Show All';
 
   return `
     <div class="rank-list-wrap">
@@ -1702,7 +1939,7 @@ function renderTradeRankList(trades, kind, expanded) {
           </div>
         `).join('')}
       </div>
-      ${trades.length > 5 ? `
+      ${trades.length > 3 ? `
         <button
           type="button"
           class="ghost-btn rank-toggle-btn"
@@ -1730,6 +1967,7 @@ function renderTradingMetricsCards(riwayatRows) {
         <div class="metric-card">
           <span class="metric-label">Total Trade</span>
           <strong>${metrics.totalTrade}</strong>
+          <div class="metric-copy">Win ${metrics.winCount} · Lose ${metrics.loseCount}</div>
         </div>
         <div class="metric-card">
           <span class="metric-label">Win Rate</span>
@@ -1848,6 +2086,7 @@ function renderPerformanceTable() {
     ? buildDailyPerformanceRows(activeRows)
     : buildMonthlyPerformanceRows(activeRows);
   const renderedRows = [...tableRows].reverse();
+  const visibleRows = appState.performanceShowAllRows ? renderedRows : renderedRows.slice(0, 50);
 
   if (!renderedRows.length) {
     target.innerHTML = '<div class="empty-card">Tidak ada data performance pada rentang tanggal tersebut.</div>';
@@ -1858,7 +2097,7 @@ function renderPerformanceTable() {
     ? ['Tanggal', 'Realized Today', 'Realized Acc', 'Unrealized', 'Movement', 'Movement Delta', '% Porto Growth', '% IHSG', 'Alpha']
     : ['Tanggal', 'Realized Month', 'Realized Acc', 'Unrealized', 'Movement', 'Movement Delta', '% Porto Growth', '% IHSG', 'Alpha'];
 
-  const bodyHtml = renderedRows.map((row) => `
+  const bodyHtml = visibleRows.map((row) => `
     <tr>
       <td>${row.tanggal || '-'}</td>
       <td class="${displayToneClass(row.realizedToday || row.realizedMonth)}">${row.realizedToday || row.realizedMonth || '-'}</td>
@@ -1881,7 +2120,17 @@ function renderPerformanceTable() {
         <tbody>${bodyHtml}</tbody>
       </table>
     </div>
+    ${renderedRows.length > 50 ? `
+      <button type="button" class="ghost-btn table-toggle-btn" id="performance-table-toggle">
+        ${appState.performanceShowAllRows ? 'Show Top 50' : 'Show All'}
+      </button>
+    ` : ''}
   `;
+
+  document.getElementById('performance-table-toggle')?.addEventListener('click', () => {
+    appState.performanceShowAllRows = !appState.performanceShowAllRows;
+    renderPerformanceTable();
+  });
 }
 
 function renderAnalyticsEquityChart() {
@@ -1940,7 +2189,10 @@ function renderAnalyticsEquityChart() {
   analyticsChart = new Chart(canvas, {
     type: 'line',
     data: {
-      labels: state.series.map((row) => formatTanggal(row.date)),
+      labels: state.series.map((row) => formatShortDate(
+        row.date,
+        shouldIncludeYearForChart(state.series)
+      )),
       datasets: [
         {
           label: 'Portfolio',
@@ -1999,8 +2251,10 @@ function renderAnalyticsEquityChart() {
             display: false
           },
           ticks: {
-            maxRotation: 0,
-            autoSkip: true
+            minRotation: 45,
+            maxRotation: 45,
+            autoSkip: true,
+            maxTicksLimit: state.series.length > 36 ? 8 : 12
           }
         },
         y: {
@@ -2020,6 +2274,7 @@ function bindAnalyticsControls() {
     if (button.dataset.bound) return;
     button.addEventListener('click', () => {
       appState.analyticsRangePreset = button.dataset.analyticsRange;
+      appState.performanceShowAllRows = false;
       renderAnalyticsEquityChart();
       renderTradingMetricsCards(appState.riwayatData);
       renderPerformanceTable();
@@ -2039,6 +2294,7 @@ function bindAnalyticsControls() {
       appState.analyticsCustomStart = customStart?.value || '';
       appState.analyticsCustomEnd = customEnd?.value || '';
       appState.analyticsRangePreset = 'custom';
+      appState.performanceShowAllRows = false;
       renderAnalyticsEquityChart();
       renderTradingMetricsCards(appState.riwayatData);
       renderPerformanceTable();
@@ -2050,6 +2306,7 @@ function bindAnalyticsControls() {
     if (button.dataset.bound) return;
     button.addEventListener('click', () => {
       appState.performanceTableView = button.dataset.performanceView;
+      appState.performanceShowAllRows = false;
       renderPerformanceTable();
     });
     button.dataset.bound = 'true';

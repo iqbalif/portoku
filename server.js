@@ -367,7 +367,7 @@ async function getDailyTradeState(sheets, tanggal, currentTradeNominal = 0) {
 
   const targetDateKey = normalizeDateKey(tanggal);
   const rows = result.data.values || [];
-  let totalTradeNominal = currentTradeNominal;
+  let totalTradeNominal = 0;
   let beaMeteraiExists = false;
 
   rows.forEach((row) => {
@@ -383,6 +383,15 @@ async function getDailyTradeState(sheets, tanggal, currentTradeNominal = 0) {
     if (jenis === 'BELI' || jenis === 'JUAL') {
       totalTradeNominal += calculateTradeNominal(row[3], row[4]);
     }
+  });
+
+  console.log('[BEA METERAI BACKEND]', {
+    tanggal,
+    targetDateKey,
+    nilaiTransaksiTerakhir: currentTradeNominal,
+    totalHarianDariSheet: totalTradeNominal,
+    kenaMaterai: totalTradeNominal >= 10000000,
+    beaMeteraiExists
   });
 
   return {
