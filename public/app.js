@@ -848,21 +848,38 @@ function renderLoginState(errorMessage = '') {
 }
 
 function buildTypeButtons() {
-  const grid = document.getElementById('type-grid');
-  grid.innerHTML = TRANSACTION_TYPES.map((type) => `
-    <button
-      type="button"
-      class="type-btn ${type.value === appState.selectedType ? 'active' : ''}"
-      data-type="${type.value}"
-    >
-      <span>${type.label}</span>
-    </button>
-  `).join('');
+  const typeClassMap = {
+    'BELI': 'btn-beli',
+    'JUAL': 'btn-jual',
+    'TOP UP': 'btn-topup',
+    'WITHDRAW': 'btn-tarik',
+    'DIVIDEN': 'btn-dividen',
+    'BEA METERAI': 'btn-bea'
+  };
 
-  grid.querySelectorAll('.type-btn').forEach((button) => {
+  const grid = document.getElementById('type-grid');
+  grid.innerHTML = TRANSACTION_TYPES.map((type) => {
+    const typeClass = typeClassMap[type.value] || '';
+    const stateClass = type.value === appState.selectedType ? 'active' : 'inactive';
+    return `
+      <button
+        type="button"
+        class="btn-type ${typeClass} ${stateClass}"
+        data-type="${type.value}"
+      >
+        <span>${type.label}</span>
+      </button>
+    `;
+  }).join('');
+
+  grid.querySelectorAll('.btn-type').forEach((button) => {
     button.addEventListener('click', () => {
       appState.selectedType = button.dataset.type;
-      grid.querySelectorAll('.type-btn').forEach((item) => item.classList.remove('active'));
+      grid.querySelectorAll('.btn-type').forEach((item) => {
+        item.classList.remove('active');
+        item.classList.add('inactive');
+      });
+      button.classList.remove('inactive');
       button.classList.add('active');
       updateInputVisibility();
     });
@@ -910,11 +927,37 @@ function initInputForm() {
 
 function ensureSellInputHelpers() {
   const inputKode = document.getElementById('input-kode');
-  if (inputKode && !document.getElementById('portfolio-code-options')) {
-    inputKode.insertAdjacentHTML('afterend', '<datalist id="portfolio-code-options"></datalist>');
-  }
-  if (inputKode) {
-    inputKode.setAttribute('list', 'portfolio-code-options');
+
+  // Inject custom dropdown (bukan datalist)
+  if (inputKode && !document.getElementById('stock-dropdown')) {
+    inputKode.insertAdjacentHTML('afterend', '<div id="stock-dropdown" class="custom-dropdown"></div>');
+
+    // Atribut untuk disable native iOS suggestion
+    inputKode.setAttribute('autocomplete', 'off');
+    inputKode.setAttribute('autocorrect', 'off');
+    inputKode.setAttribute('autocapitalize', 'characters');
+    inputKode.setAttribute('spellcheck', 'false');
+    inputKode.setAttribute('readonly', '');
+
+    // Toggle dropdown saat input diklik
+    inputKode.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const dropdown = document.getElementById('stock-dropdown');
+      if (!dropdown) return;
+      const isOpen = dropdown.classList.contains('open');
+      dropdown.classList.toggle('open', !isOpen);
+    });
+
+    // Tutup dropdown saat klik di luar
+    document.addEventListener('click', () => {
+      const dropdown = document.getElementById('stock-dropdown');
+      if (dropdown) dropdown.classList.remove('open');
+    });
+
+    // Klik di dalam dropdown tidak menutup
+    document.getElementById('stock-dropdown')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
   }
 
   const lotInput = document.getElementById('input-lot');
@@ -937,21 +980,31 @@ function ensureSellInputHelpers() {
 
 function refreshSellInputOptions() {
   const inputKode = document.getElementById('input-kode');
-  const dataList = document.getElementById('portfolio-code-options');
-  if (!inputKode || !dataList) return;
+  const dropdown = document.getElementById('stock-dropdown');
+  if (!inputKode || !dropdown) return;
 
   const isSell = appState.selectedType === 'JUAL';
-  inputKode.removeAttribute('list');
 
   if (!isSell || !appState.portfolioData.length) {
-    dataList.innerHTML = '';
+    dropdown.innerHTML = '';
+    dropdown.classList.remove('open');
     return;
   }
 
-  inputKode.setAttribute('list', 'portfolio-code-options');
-  dataList.innerHTML = appState.portfolioData.map((item) => `
-    <option value="${item.kode}">${item.kode}</option>
+  dropdown.innerHTML = appState.portfolioData.map((item) => `
+    <div class="dropdown-item" data-kode="${item.kode}">
+      <span class="dropdown-item-code">${item.kode}</span>
+      <span class="dropdown-item-lot">${item.lot.toLocaleString('id-ID')} lot</span>
+    </div>
   `).join('');
+
+  dropdown.querySelectorAll('.dropdown-item').forEach((el) => {
+    el.addEventListener('click', () => {
+      inputKode.value = el.dataset.kode;
+      dropdown.classList.remove('open');
+      refreshSellAllButton();
+    });
+  });
 }
 
 function refreshSellAllButton() {
@@ -1195,7 +1248,7 @@ function renderDashboard(summary, portfolio) {
 
   target.innerHTML = `
     <div class="dashboard-grid">
-      <div class="dashboard-card dashboard-card-large dashboard-card-primary">
+      <div class="dashboard-card dashboard-card-large dashboard-card-primary card-saldo-main">
         <div class="dashboard-card-head">
           <div class="panel-kicker">Ringkasan utama</div>
         <div class="dashboard-card-label">Total Kekayaan</div>
@@ -1208,32 +1261,38 @@ function renderDashboard(summary, portfolio) {
       </div>
 
       <div class="dashboard-stack">
-        <div class="dashboard-card dashboard-card-small">
+        <div class="dashboard-card dashboard-card-small card-saldo-child">
           <div class="dashboard-card-label">Sisa Kas</div>
           <div class="dashboard-card-value">${formatRp(summary.sisaKas)}</div>
           <div class="dashboard-card-copy">Dana yang belum dibelikan saham</div>
         </div>
-        <div class="dashboard-card dashboard-card-small">
+        <div class="dashboard-card dashboard-card-small card-saldo-child">
           <div class="dashboard-card-label">Aset Saham</div>
           <div class="dashboard-card-value">${formatRp(summary.asetSaham)}</div>
-          <div class="dashboard-card-copy">Nilai saham yang masih dipegang</div>
+          ${(() => {
+            const total = summary.asetSaham + summary.sisaKas;
+            const pct = total > 0 ? (summary.asetSaham / total * 100).toFixed(1) : null;
+            return pct !== null
+              ? `<div class="dashboard-card-copy card-pct-label">${pct}% dari dana RDN diinvestasikan</div>`
+              : '<div class="dashboard-card-copy">Nilai saham yang masih dipegang</div>';
+          })()}
         </div>
       </div>
 
       <div class="dashboard-stack">
-        <div class="dashboard-card dashboard-card-small">
+        <div class="dashboard-card dashboard-card-small card-perf-child">
           <div class="dashboard-card-label">Realized Profit/Loss</div>
           <div class="dashboard-card-value ${toneClass(summary.realizedAll)}">${formatRp(summary.realizedAll)}</div>
           <div class="dashboard-card-copy">Hasil yang sudah terkunci</div>
         </div>
-        <div class="dashboard-card dashboard-card-small">
+        <div class="dashboard-card dashboard-card-small card-perf-child">
           <div class="dashboard-card-label">Unrealized Profit/Loss</div>
           <div class="dashboard-card-value ${toneClass(summary.unrealized)}">${formatRp(summary.unrealized)}</div>
           <div class="dashboard-card-copy">Untung rugi posisi yang masih aktif</div>
         </div>
       </div>
 
-      <div class="dashboard-card dashboard-card-large dashboard-card-secondary">
+      <div class="dashboard-card dashboard-card-large dashboard-card-secondary card-perf-main">
         <div class="dashboard-card-head">
           <div class="panel-kicker">Performa utama</div>
           <div class="dashboard-card-label">Movement</div>

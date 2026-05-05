@@ -264,10 +264,25 @@ app.get('/api/tracker', async (req, res) => {
     const formattedDailyPctRows = (formattedRanges[4] && formattedRanges[4].values) || [];
     const formattedMonthlyRealizedRows = (formattedRanges[5] && formattedRanges[5].values) || [];
     const formattedMonthlyPctRows = (formattedRanges[6] && formattedRanges[6].values) || [];
+
+    // Pindah ke sini agar bisa dipakai bersama oleh rows dan trackerHelper
+    const numericRanges = numericTrackerHelperResult.data.valueRanges || [];
+    const dateRows = (numericRanges[0] && numericRanges[0].values) || [];
+    const cumulativeRows = (numericRanges[1] && numericRanges[1].values) || [];
+
+    // Filter sama dengan trackerHelper: wajib ada tanggal + cumIHSG + cumPorto
     const rows = formattedDateRows.map((dateRow, index) => {
       const metricRow = formattedCoreMetricRows[index] || [];
+      const cumulativeRow = cumulativeRows[index] || [];
       const date = dateRow && dateRow[0];
-      if (date === null || date === undefined || String(date).trim() === '') {
+      const cumIHSG = cumulativeRow[0];
+      const cumPorto = cumulativeRow[1];
+
+      if (
+        date === null || date === undefined || String(date).trim() === '' ||
+        cumIHSG === null || cumIHSG === undefined || cumIHSG === '' ||
+        cumPorto === null || cumPorto === undefined || cumPorto === ''
+      ) {
         return null;
       }
 
@@ -278,10 +293,6 @@ app.get('/api/tracker', async (req, res) => {
         metricRow[2] || ''
       ];
     }).filter(Boolean);
-
-    const numericRanges = numericTrackerHelperResult.data.valueRanges || [];
-    const dateRows = (numericRanges[0] && numericRanges[0].values) || [];
-    const cumulativeRows = (numericRanges[1] && numericRanges[1].values) || [];
 
     const trackerHelper = dateRows.map((dateRow, index) => {
       const formattedMonthKeyRow = formattedMonthKeyRows[index] || [];
