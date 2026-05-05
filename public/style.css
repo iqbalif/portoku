@@ -593,6 +593,7 @@ body.keypad-visible #screen-login.screen.active {
 
 .field-input {
   width: 100%;
+  max-width: 100%;
   min-height: 50px;
   padding: 13px 14px;
   border: 1px solid var(--line-strong);
@@ -602,6 +603,15 @@ body.keypad-visible #screen-login.screen.active {
   font-size: 16px;
   outline: none;
   transition: var(--ease);
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+input[type="date"].field-input {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 10px;
 }
 
 .field-input:focus {
@@ -823,8 +833,8 @@ body.keypad-visible #screen-login.screen.active {
 }
 
 .preview-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
+  display: flex;
+  justify-content: space-between;
   align-items: baseline;
   gap: 12px;
   padding-top: 10px;
@@ -836,12 +846,20 @@ body.keypad-visible #screen-login.screen.active {
   padding-top: 0;
 }
 
+.preview-row span {
+  flex-shrink: 0;
+  max-width: 45%;
+}
+
 .preview-row strong {
   color: var(--ink);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
   text-align: right;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  flex: 1;
+  min-width: 0;
 }
 
 .warning-box {
@@ -1352,8 +1370,7 @@ body.keypad-visible #screen-login.screen.active {
 
   #dashboard-content .panel .list-row,
   .list-row,
-  .summary-card,
-  .preview-row {
+  .summary-card {
     grid-template-columns: minmax(0, 1fr) max-content;
   }
 

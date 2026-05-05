@@ -937,7 +937,7 @@ function ensureSellInputHelpers() {
     inputKode.setAttribute('autocorrect', 'off');
     inputKode.setAttribute('autocapitalize', 'characters');
     inputKode.setAttribute('spellcheck', 'false');
-    inputKode.setAttribute('readonly', '');
+    // readonly diatur dinamis di refreshSellInputOptions() berdasarkan tipe transaksi
 
     // Toggle dropdown saat input diklik
     inputKode.addEventListener('click', (e) => {
@@ -985,11 +985,25 @@ function refreshSellInputOptions() {
 
   const isSell = appState.selectedType === 'JUAL';
 
-  if (!isSell || !appState.portfolioData.length) {
+  if (!isSell) {
+    // Mode bukan JUAL: input bisa diketik bebas
+    inputKode.removeAttribute('readonly');
+    inputKode.removeAttribute('placeholder');
+    inputKode.setAttribute('placeholder', 'contoh: BBCA');
     dropdown.innerHTML = '';
     dropdown.classList.remove('open');
     return;
   }
+
+  if (!appState.portfolioData.length) {
+    dropdown.innerHTML = '';
+    dropdown.classList.remove('open');
+    return;
+  }
+
+  // Mode JUAL: input readonly, pilih dari dropdown
+  inputKode.setAttribute('readonly', '');
+  inputKode.setAttribute('placeholder', 'ketuk untuk pilih saham...');
 
   dropdown.innerHTML = appState.portfolioData.map((item) => `
     <div class="dropdown-item" data-kode="${item.kode}">

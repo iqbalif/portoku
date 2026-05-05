@@ -749,6 +749,8 @@ app.delete('/api/jurnal-edit', async (req, res) => {
   }
 });
 
-app.listen(process.env.PORT, () => {
-  console.log(`PortoKu server running at http://localhost:${process.env.PORT}`);
+const PORT = process.env.PORT || 3000;
+console.log('Node version:', process.version);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`PortoKu server running at http://localhost:${PORT}`);
 });
